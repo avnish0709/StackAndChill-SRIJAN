@@ -487,19 +487,19 @@ function ChatBot({
 
 export default function Home() {
   const [activeTool, setActiveTool] = useState<ToolKey>("files");
-  const [action, setAction] = useState("My landlord hasn't returned my security deposit.");
+  const [action, setAction] = useState("");
   const [conversationId, setConversationId] = useState<string | undefined>(undefined);
-  const [jurisdiction] = useState<string>("Maharashtra, India");
+  const [jurisdiction] = useState<string>("General Legal");
   const [attachedFile, setAttachedFile] = useState<AttachedFile | undefined>(undefined);
 
   const [messages, setMessages] = useState<ChatMessage[]>([
     { role: "assistant", text: "Welcome to ClauseIQ. Upload your document or describe your legal concern to receive automated legal analysis and next steps." },
   ]);
   const [dynamicOptions, setDynamicOptions] = useState<string[]>([
+    "Hospital billing dispute & patient rights",
     "Terminate rental agreement early",
     "Demand security deposit refund",
-    "Understand notice period penalties",
-    "Review rental agreement clauses",
+    "Employment non-compete & severance review",
   ]);
   const [evidenceList, setEvidenceList] = useState<EvidenceItem[]>(defaultEvidenceRows);
   const [analysisSummary, setAnalysisSummary] = useState<string>(

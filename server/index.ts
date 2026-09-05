@@ -7,6 +7,9 @@ import { nanoid } from "nanoid";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+import { ragService } from "./rag/retrievalService.js";
+import { logAnalysisToFirestore } from "./firebase.js";
+
 export async function handleChatRequest(req: Request, res: Response) {
   try {
     const { conversationId, message, jurisdiction, file } = req.body || {};
@@ -22,6 +25,17 @@ export async function handleChatRequest(req: Request, res: Response) {
 
     const currentId = conversationId || `conv_${nanoid(10)}`;
 
+    // 1. Retrieve RAG Knowledge Chunks grounded on user query & jurisdiction
+    const ragResults = await ragService.retrieve(message, jurisdiction, 3);
+    const ragContextText = ragResults.map((item, idx) => `
+[RETRIEVED LEGAL KNOWLEDGE CHUNK #${idx + 1}]
+Title: ${item.chunk.title}
+Category: ${item.chunk.category}
+Source: ${item.chunk.source}
+Legal Principles:
+${item.chunk.content}
+`).join("\n");
+
     const modelsToTry = [
       "gemini-2.5-flash",
       "gemini-3.6-flash",
@@ -33,6 +47,9 @@ export async function handleChatRequest(req: Request, res: Response) {
 
     const systemInstruction = `You are ClauseIQ, an evidence-first legal assistance engine.
 Analyze the user's legal situation for the jurisdiction: "${jurisdiction || "General Legal / Unspecified"}".
+
+GROUNDED LEGAL KNOWLEDGE RETRIEVED FROM RAG DATABASE:
+${ragContextText}
 
 Return a valid JSON object strictly matching this schema:
 {
@@ -47,7 +64,7 @@ Return a valid JSON object strictly matching this schema:
   "evidence": [
     {
       "title": "Evidence / Clause / Law Title",
-      "detail": "Reference section or observation detail",
+      "detail": "Reference section, source citation, or observation detail",
       "status": "Supported"
     },
     {
@@ -64,13 +81,14 @@ Return a valid JSON object strictly matching this schema:
 }
 
 Rules:
-1. "confidenceScore" MUST be an integer percentage from 0 to 100 reflecting your certainty based on available contract facts, legal statutes, and jurisdiction.
-2. If you DO NOT know the answer, lack facts, or the query is ambiguous/unclear, assign a low confidenceScore (< 50 or 0) and state professionally in "message": "I do not have sufficient legal or factual information to provide a definitive answer. Please upload your lease document or specify the relevant facts."
-3. "options" must contain 3-4 distinct, actionable choices for the user's next response or action.
-4. "status" in "evidence" MUST be Bootstrapped as exactly one of: "Supported", "Partly supported", "Insufficient".
-5. Output raw JSON only. Do not include markdown code block formatting like \`\`\`json.`;
+1. "confidenceScore" MUST be an integer percentage from 0 to 100 reflecting your certainty based strictly on available contract facts, retrieved legal statutes, and specified jurisdiction.
+2. Ground your evidence items and advice on the RETRIEVED LEGAL KNOWLEDGE CHUNKS above and any attached user document. Include exact legal titles or sources in the evidence details.
+3. If you DO NOT know the answer, lack sufficient legal facts, or if the question is non-legal/out-of-domain, assign a low confidenceScore (< 40 or 0) and state professionally in "message": "I do not have sufficient legal or factual information to provide a definitive answer on this topic. Please provide your contract document or specify your legal situation."
+4. "options" must contain 3-4 distinct, actionable choices for the user's next response or action.
+5. "status" in "evidence" MUST be exactly one of: "Supported", "Partly supported", "Insufficient".
+6. Output raw JSON only. Do not include markdown code block formatting like \`\`\`json.`;
 
-    const userPrompt = `User Message: ${message.trim()}
+    const userPrompt = `User Query: ${message.trim()}
 Jurisdiction: ${jurisdiction || "Not specified"}`;
 
     const userParts: any[] = [];
@@ -173,14 +191,22 @@ Jurisdiction: ${jurisdiction || "Not specified"}`;
     const rawScore = Number(parsed.confidenceScore);
     const confidenceScore = Number.isFinite(rawScore) ? Math.min(100, Math.max(0, Math.round(rawScore))) : 85;
 
-    return res.json({
+    const resultObj = {
       conversationId: currentId,
       message: parsed.message || candidateText,
       confidenceScore,
       options: Array.isArray(parsed.options) ? parsed.options : [],
       summary: parsed.summary || "Legal issue analysis",
       evidence: Array.isArray(parsed.evidence) ? parsed.evidence : [],
-    });
+      query: message,
+      jurisdiction: jurisdiction || "Not specified",
+      ragSources: ragResults.map((r) => r.chunk.title),
+    };
+
+    // Asynchronously log to Firestore (non-blocking)
+    logAnalysisToFirestore(resultObj).catch(() => {});
+
+    return res.json(resultObj);
   } catch (err: any) {
     console.error("Error handling /api/chat:", err);
     return res.status(500).json({ error: err.message || "Internal server error" });
