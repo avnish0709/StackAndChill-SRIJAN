@@ -376,8 +376,8 @@ function EvidenceIndex({
           <strong>Legal Assessment & Strategy</strong>
           <p>{summary || "Legal analysis from the Gemini AI engine."}</p>
         </div>
-        <div className="analysis-summary__image">
-          <img src={clauseImageUrl} alt="Close view of a highlighted legal clause" />
+        <div className="analysis-summary__badge">
+          <FileCheck2 size={24} className="text-saffron" />
           <span>Evidence Index</span>
         </div>
       </div>
